@@ -45,6 +45,10 @@ export class Tmux {
     await this.run(["send-keys", "-t", sessionName, "Enter"]);
   }
 
+  async submitInput(sessionName: string): Promise<void> {
+    await this.run(["send-keys", "-t", sessionName, "C-Enter"]);
+  }
+
   async clearCurrentLine(sessionName: string): Promise<void> {
     await this.run(["send-keys", "-t", sessionName, "C-u"]);
   }

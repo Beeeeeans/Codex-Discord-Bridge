@@ -37,7 +37,7 @@ export class DiscordHandlers {
     await this.tmux.clearCurrentLine(record.tmuxSession);
     await this.tmux.sendText(record.tmuxSession, payload);
     await delay(150);
-    await this.tmux.sendEnter(record.tmuxSession);
+    await this.tmux.submitInput(record.tmuxSession);
     await message.react("✅").catch(() => undefined);
   }
 

@@ -16,6 +16,8 @@ export interface BridgeConfig {
   databasePath: string;
   outputPollMs: number;
   outputIdleMs: number;
+  liveStatusUpdateMs: number;
+  liveStatusLines: number;
   discordChunkChars: number;
   autoStartOnMessage: boolean;
   codexCommand: string;

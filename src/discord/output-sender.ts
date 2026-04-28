@@ -1,5 +1,5 @@
-import { type Client } from "discord.js";
-import { codeBlock, chunkForDiscord } from "../utils/text.js";
+import { type Client, type Message } from "discord.js";
+import { cleanTerminalOutput } from "../utils/text.js";
 import { tailFromOffset } from "../sessions/log-tail.js";
 import { choicePromptComponents, choicePromptContent, detectChoicePrompt } from "./interactive-prompts.js";
 import type { AppConfig, SessionRecord } from "../sessions/session-types.js";
@@ -9,9 +9,9 @@ import { logger } from "../logger.js";
 
 export class OutputSender {
   private timer: NodeJS.Timeout | undefined;
-  private readonly pending = new Map<string, NodeJS.Timeout>();
-  private readonly buffers = new Map<string, string[]>();
-  private readonly bufferStartedAt = new Map<string, number>();
+  private readonly liveStatusMessages = new Map<string, Message>();
+  private readonly liveStatusLastEditedAt = new Map<string, number>();
+  private readonly lastPromptKeys = new Map<string, string>();
 
   constructor(
     private readonly client: Client,
@@ -28,124 +28,121 @@ export class OutputSender {
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
-    for (const timeout of this.pending.values()) clearTimeout(timeout);
-    this.pending.clear();
-    this.buffers.clear();
-    this.bufferStartedAt.clear();
+    this.liveStatusMessages.clear();
+    this.liveStatusLastEditedAt.clear();
+    this.lastPromptKeys.clear();
   }
 
   private async poll(): Promise<void> {
     for (const record of this.sessions.list().filter((session) => session.status === "running")) {
       try {
         const result = await tailFromOffset(record.logPath, record.byteOffset);
-        if (!result.text) {
-          this.sessions.updateOffset(record.threadId, result.byteOffset);
-          continue;
-        }
-
         this.sessions.updateOffset(record.threadId, result.byteOffset);
-        const nowMs = Date.now();
-        const firstBufferedAtMs = this.bufferStartedAt.get(record.threadId) ?? nowMs;
-        this.bufferStartedAt.set(record.threadId, firstBufferedAtMs);
-
-        const buffer = this.buffers.get(record.threadId) ?? [];
-        buffer.push(result.text);
-        this.buffers.set(record.threadId, buffer);
-
-        const previous = this.pending.get(record.threadId);
-        if (previous) clearTimeout(previous);
-
-        const maxBufferMs = Math.max(this.config.bridge.outputIdleMs * 8, 10_000);
-        if (
-          shouldFlushBufferedOutput({
-            nowMs,
-            lastOutputAtMs: nowMs,
-            firstBufferedAtMs,
-            idleMs: this.config.bridge.outputIdleMs,
-            maxBufferMs
-          })
-        ) {
-          this.flush(record);
-          continue;
-        }
-
-        this.pending.set(
-          record.threadId,
-          setTimeout(() => {
-            this.flush(record);
-          }, this.config.bridge.outputIdleMs)
-        );
+        if (result.text) await this.sendChoicePromptIfPresent(record, result.text);
+        await this.updateLiveStatus(record, Date.now());
       } catch (error) {
         logger.warn({ error, threadId: record.threadId }, "failed to poll session output");
       }
     }
   }
 
-  private flush(record: SessionRecord): void {
-    this.pending.delete(record.threadId);
-    this.bufferStartedAt.delete(record.threadId);
-    const text = (this.buffers.get(record.threadId) ?? []).join("\n");
-    this.buffers.delete(record.threadId);
-    void this.send(record, text);
-  }
-
-  private async send(record: SessionRecord, rawText: string): Promise<void> {
+  private async sendChoicePromptIfPresent(record: SessionRecord, rawText: string): Promise<boolean> {
     const threadId = record.threadId;
-    const channel = await this.client.channels.fetch(threadId).catch(() => null);
-    if (!channel?.isTextBased()) return;
-
-    if (!("send" in channel) || typeof channel.send !== "function") return;
-
     const rawPrompt = detectChoicePrompt(rawText, threadId);
-    if (rawPrompt) {
-      await channel.send({
-        content: choicePromptContent(rawPrompt),
-        components: choicePromptComponents(rawPrompt)
-      });
-      return;
-    }
+    if (rawPrompt) return this.sendChoicePrompt(record, rawPrompt);
 
-    const text = await this.presentableText(record, rawText);
-    if (!text.trim()) return;
+    const cleanedPrompt = detectChoicePrompt(cleanForDiscord(rawText), threadId);
+    if (cleanedPrompt) return this.sendChoicePrompt(record, cleanedPrompt);
 
-    const prompt = detectChoicePrompt(text, threadId);
-    if (prompt) {
-      await channel.send({
-        content: choicePromptContent(prompt),
-        components: choicePromptComponents(prompt)
-      });
-      return;
-    }
-
-    const chunks = chunkForDiscord(text, Math.min(this.config.bridge.discordChunkChars - 30, 1800));
-    for (const chunk of chunks) {
-      await channel.send(`**Codex output**\n${codeBlock(chunk)}`);
-    }
+    return false;
   }
 
-  private async presentableText(record: SessionRecord, rawText: string): Promise<string> {
-    if (detectChoicePrompt(rawText, record.threadId)) return rawText;
-    if (!looksLikeTuiRedrawNoise(rawText)) return cleanForDiscord(rawText);
+  private async sendChoicePrompt(record: SessionRecord, prompt: NonNullable<ReturnType<typeof detectChoicePrompt>>): Promise<boolean> {
+    const key = `${prompt.title}:${prompt.question}:${prompt.details ?? ""}:${prompt.choices.map((choice) => choice.value).join(",")}`;
+    if (this.lastPromptKeys.get(record.threadId) === key) return false;
 
-    const pane = await this.tmux.capturePane(record.tmuxSession, 80).catch(() => "");
-    return cleanForDiscord(pane.trim() || rawText);
+    const channel = await this.fetchSendableThread(record.threadId);
+    if (!channel) return false;
+    await channel.send({
+      content: choicePromptContent(prompt),
+      components: choicePromptComponents(prompt)
+    });
+    this.lastPromptKeys.set(record.threadId, key);
+    return true;
+  }
+
+  private async updateLiveStatus(record: SessionRecord, nowMs: number): Promise<void> {
+    const lastEditMs = this.liveStatusLastEditedAt.get(record.threadId);
+    if (!shouldEditLiveStatus({ nowMs, lastEditMs, updateMs: this.config.bridge.liveStatusUpdateMs })) return;
+
+    const channel = await this.fetchSendableThread(record.threadId);
+    if (!channel) return;
+
+    const pane = await this.tmux.capturePane(record.tmuxSession, this.config.bridge.liveStatusLines).catch(() => "");
+    const cleanedPaneText = cleanForDiscord(pane);
+    if (!cleanedPaneText.trim()) return;
+
+    const content = formatLiveStatusMessage({
+      cleanedPaneText,
+      lineCount: this.config.bridge.liveStatusLines,
+      now: new Date(nowMs)
+    });
+
+    const existing = this.liveStatusMessages.get(record.threadId);
+    if (existing) {
+      const edited = await existing.edit(content).catch(() => null);
+      if (edited) {
+        this.liveStatusLastEditedAt.set(record.threadId, nowMs);
+        return;
+      }
+      this.liveStatusMessages.delete(record.threadId);
+    }
+
+    const sent = await channel.send(content);
+    this.liveStatusMessages.set(record.threadId, sent);
+    this.liveStatusLastEditedAt.set(record.threadId, nowMs);
+  }
+
+  private async fetchSendableThread(threadId: string): Promise<({ send: (...args: any[]) => Promise<Message> } & { isTextBased: () => boolean }) | undefined> {
+    const channel = await this.client.channels.fetch(threadId).catch(() => null);
+    if (!channel?.isTextBased()) return undefined;
+    if (!("send" in channel) || typeof channel.send !== "function") return undefined;
+    return channel as { send: (...args: any[]) => Promise<Message> } & { isTextBased: () => boolean };
   }
 }
 
-export interface FlushDecisionInput {
+export interface LiveStatusDecisionInput {
   nowMs: number;
-  lastOutputAtMs: number;
-  firstBufferedAtMs: number;
-  idleMs: number;
-  maxBufferMs: number;
+  lastEditMs: number | undefined;
+  updateMs: number;
 }
 
-export function shouldFlushBufferedOutput(input: FlushDecisionInput): boolean {
-  return input.nowMs - input.lastOutputAtMs >= input.idleMs || input.nowMs - input.firstBufferedAtMs >= input.maxBufferMs;
+export function shouldEditLiveStatus(input: LiveStatusDecisionInput): boolean {
+  return input.lastEditMs === undefined || input.nowMs - input.lastEditMs >= input.updateMs;
+}
+
+export interface LiveStatusMessageInput {
+  cleanedPaneText: string;
+  lineCount: number;
+  now: Date;
+}
+
+export function formatLiveStatusMessage(input: LiveStatusMessageInput): string {
+  const lines = cleanForDiscord(cleanTerminalOutput(input.cleanedPaneText))
+    .split("\n")
+    .map((line) => line.trimEnd())
+    .filter((line) => line.length > 0)
+    .slice(-input.lineCount);
+  let body = lines.length > 0 ? lines.join("\n") : "(no useful output yet)";
+  const maxBodyChars = 1800;
+  if (body.length > maxBodyChars) body = `…${body.slice(-(maxBodyChars - 1))}`;
+  const timestamp = input.now.toISOString().slice(11, 19);
+
+  return ["🧠 Codex is working…", "", "```console", body.replace(/```/g, "`\u200b``"), "```", `Updated ${timestamp}`].join("\n");
 }
 
 export function cleanForDiscord(text: string): string {
-  const lines = text
+  const lines = cleanTerminalOutput(text)
     .replace(/•/g, "\n• ")
     .split("\n")
     .map((line) => normalizeCodexLine(line))

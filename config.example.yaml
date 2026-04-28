@@ -10,6 +10,10 @@ bridge:
   database_path: "./data/bridge.sqlite"
   output_poll_ms: 1000
   output_idle_ms: 1200
+  # Live status mode: one bot message per thread, edited periodically with
+  # the latest cleaned tmux pane snapshot instead of spamming TUI redraws.
+  live_status_update_ms: 5000
+  live_status_lines: 50
   discord_chunk_chars: 1900
   auto_start_on_message: true
   codex_command: "codex"

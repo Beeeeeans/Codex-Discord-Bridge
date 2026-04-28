@@ -46,8 +46,9 @@ The bridge will paste that into the agent like terminal input. Very glamorous. V
 
 4. The bridge sends it into the local CLI session.
 5. The agent works inside your configured project folder.
-6. Output comes back to the same Discord thread.
-7. Everyone watches the goblin cook. 🍳
+6. The bridge updates one live status message with the latest cleaned tmux pane.
+7. Approval prompts still appear separately with buttons when Codex needs a decision.
+8. Everyone watches the goblin cook without drowning in spinner soup. 🍳
 
 ---
 
@@ -122,7 +123,17 @@ esc to interrupt
 gpt-5.5 default · ~/project
 ```
 
-before posting back to Discord.
+before showing them in Discord.
+
+By default, active sessions use a **single live status message** per thread. The bridge edits that message every few seconds with the latest cleaned terminal window, rather than posting a fresh message for every `Working…` redraw.
+
+Config knobs:
+
+```yaml
+bridge:
+  live_status_update_ms: 5000
+  live_status_lines: 50
+```
 
 This is basically regex with a broom. It is useful, but not divine. 🧹
 

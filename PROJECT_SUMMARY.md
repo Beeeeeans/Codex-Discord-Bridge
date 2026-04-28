@@ -17,7 +17,7 @@ No mystical cloud platform. No extra LLM layer. Just Discord, Node, tmux, SQLite
 - Maps each Discord thread to its own persistent terminal session.
 - Launches a configured CLI agent, such as Codex, inside a local project folder.
 - Relays normal Discord messages into that CLI session.
-- Captures terminal output and posts it back into the same Discord thread.
+- Captures the current tmux pane and edits one live status message in the same Discord thread.
 - Stores session metadata in SQLite so restarts are less tragic.
 - Provides bridge commands like `!start`, `!status`, `!tail`, `!tmux`, `!ctrlc`, and `!restart`.
 - Converts known approval prompts into Discord buttons where possible.
@@ -85,7 +85,7 @@ This is not a giant AI platform.
 It is a useful goblin pipe:
 
 ```text
-Discord → tmux → CLI agent → tmux logs → Discord
+Discord → tmux → CLI agent → tmux pane snapshot → edited Discord status
 ```
 
 Small, practical, slightly haunted, and surprisingly handy.

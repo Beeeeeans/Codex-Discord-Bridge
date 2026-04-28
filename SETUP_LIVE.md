@@ -81,6 +81,10 @@ projects:
     auto_start_on_message: true
     codex_command: "codex"
     codex_args: []
+
+bridge:
+  live_status_update_ms: 5000
+  live_status_lines: 50
 ```
 
 Important bits:
@@ -88,6 +92,8 @@ Important bits:
 - `channel_id` = Discord parent channel ID
 - `workdir` = local git repo where Codex should wake up
 - `codex_command` = CLI command to run inside tmux
+- `live_status_update_ms` = how often the bridge edits the one live status message per thread
+- `live_status_lines` = how many cleaned tmux pane lines to show in that live status message
 
 The default expectation is Codex CLI. If you later decide to hack in another terminal-based agent, that is adapter territory — bring snacks and a small fire extinguisher. 🧯
 
@@ -134,7 +140,7 @@ In Discord:
    Check git status and tell me whether this repo is clean.
    ```
 
-5. Confirm Codex output comes back into the same thread.
+5. Confirm the bridge creates/edits one live “Codex is working…” status message in the same thread.
 
 If it does, the cave is alive. 🕳️✨
 

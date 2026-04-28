@@ -35,6 +35,9 @@ No extra assistant framework. No extra LLM in the middle. No majestic orchestrat
 - 🧽 **Terminal grime removal**  
   Codex’s TUI sometimes emits haunted fragments like `WorkiWorkin`, `WWo`, and other cursed alphabet soup. The bridge attempts to clean that before posting.
 
+- 🪟 **One live status message per thread**  
+  Instead of spraying every spinner redraw into Discord, the bridge keeps a single “Codex is working…” message updated every few seconds with the latest cleaned tmux pane snapshot. Fewer pings, less soup, happier cave.
+
 - 🧠 **Restart-safe-ish sessions**  
   Session metadata is stored in SQLite so the daemon can remember which Discord thread mapped to which tmux cave.
 
@@ -93,9 +96,9 @@ Bridge pastes your message into Codex
   ↓
 Codex does coding goblin things
   ↓
-Bridge captures + cleans output
+Bridge captures + cleans the current tmux pane
   ↓
-Discord gets the reply
+Discord sees one live status message being edited
 ```
 
 ---
@@ -135,6 +138,10 @@ projects:
     name: Example Project
     channel_id: "123456789012345678"
     workdir: "/absolute/path/to/your/project"
+
+bridge:
+  live_status_update_ms: 5000
+  live_status_lines: 50
 ```
 
 ### 5. Build and run the goblin

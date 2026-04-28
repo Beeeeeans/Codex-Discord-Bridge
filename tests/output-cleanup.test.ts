@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanForDiscord } from "../src/discord/output-sender.js";
+import { cleanForDiscord, shouldFlushBufferedOutput } from "../src/discord/output-sender.js";
 
 describe("Codex output cleanup", () => {
   it("removes Codex TUI spinner fragments and prompt echoes while keeping useful output", () => {
@@ -61,5 +61,29 @@ WWo
         "Clean again: main is tracking origin/main, with no uncommitted changes."
       ].join("\n")
     );
+  });
+
+  it("flushes buffered output after a maximum wait even while terminal output keeps streaming", () => {
+    expect(
+      shouldFlushBufferedOutput({
+        nowMs: 10_001,
+        lastOutputAtMs: 10_000,
+        firstBufferedAtMs: 0,
+        idleMs: 1_200,
+        maxBufferMs: 10_000
+      })
+    ).toBe(true);
+  });
+
+  it("waits for idle output before the maximum wait is reached", () => {
+    expect(
+      shouldFlushBufferedOutput({
+        nowMs: 5_000,
+        lastOutputAtMs: 4_900,
+        firstBufferedAtMs: 0,
+        idleMs: 1_200,
+        maxBufferMs: 10_000
+      })
+    ).toBe(false);
   });
 });

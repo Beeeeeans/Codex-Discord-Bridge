@@ -11,6 +11,7 @@ export class OutputSender {
   private timer: NodeJS.Timeout | undefined;
   private readonly pending = new Map<string, NodeJS.Timeout>();
   private readonly buffers = new Map<string, string[]>();
+  private readonly bufferStartedAt = new Map<string, number>();
 
   constructor(
     private readonly client: Client,
@@ -30,6 +31,7 @@ export class OutputSender {
     for (const timeout of this.pending.values()) clearTimeout(timeout);
     this.pending.clear();
     this.buffers.clear();
+    this.bufferStartedAt.clear();
   }
 
   private async poll(): Promise<void> {
@@ -42,25 +44,49 @@ export class OutputSender {
         }
 
         this.sessions.updateOffset(record.threadId, result.byteOffset);
+        const nowMs = Date.now();
+        const firstBufferedAtMs = this.bufferStartedAt.get(record.threadId) ?? nowMs;
+        this.bufferStartedAt.set(record.threadId, firstBufferedAtMs);
+
         const buffer = this.buffers.get(record.threadId) ?? [];
         buffer.push(result.text);
         this.buffers.set(record.threadId, buffer);
 
         const previous = this.pending.get(record.threadId);
         if (previous) clearTimeout(previous);
+
+        const maxBufferMs = Math.max(this.config.bridge.outputIdleMs * 8, 10_000);
+        if (
+          shouldFlushBufferedOutput({
+            nowMs,
+            lastOutputAtMs: nowMs,
+            firstBufferedAtMs,
+            idleMs: this.config.bridge.outputIdleMs,
+            maxBufferMs
+          })
+        ) {
+          this.flush(record);
+          continue;
+        }
+
         this.pending.set(
           record.threadId,
           setTimeout(() => {
-            this.pending.delete(record.threadId);
-            const text = (this.buffers.get(record.threadId) ?? []).join("\n");
-            this.buffers.delete(record.threadId);
-            void this.send(record, text);
+            this.flush(record);
           }, this.config.bridge.outputIdleMs)
         );
       } catch (error) {
         logger.warn({ error, threadId: record.threadId }, "failed to poll session output");
       }
     }
+  }
+
+  private flush(record: SessionRecord): void {
+    this.pending.delete(record.threadId);
+    this.bufferStartedAt.delete(record.threadId);
+    const text = (this.buffers.get(record.threadId) ?? []).join("\n");
+    this.buffers.delete(record.threadId);
+    void this.send(record, text);
   }
 
   private async send(record: SessionRecord, rawText: string): Promise<void> {
@@ -104,6 +130,18 @@ export class OutputSender {
     const pane = await this.tmux.capturePane(record.tmuxSession, 80).catch(() => "");
     return cleanForDiscord(pane.trim() || rawText);
   }
+}
+
+export interface FlushDecisionInput {
+  nowMs: number;
+  lastOutputAtMs: number;
+  firstBufferedAtMs: number;
+  idleMs: number;
+  maxBufferMs: number;
+}
+
+export function shouldFlushBufferedOutput(input: FlushDecisionInput): boolean {
+  return input.nowMs - input.lastOutputAtMs >= input.idleMs || input.nowMs - input.firstBufferedAtMs >= input.maxBufferMs;
 }
 
 export function cleanForDiscord(text: string): string {

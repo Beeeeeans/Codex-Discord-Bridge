@@ -1,0 +1,27 @@
+discord:
+  token_env: DISCORD_TOKEN
+  ignore_bots: true
+  # Optional allow-list. Leave empty or omit to allow all users with channel access.
+  allowed_user_ids: []
+
+bridge:
+  command_prefix: "!"
+  data_dir: "./data"
+  database_path: "./data/bridge.sqlite"
+  output_poll_ms: 1000
+  output_idle_ms: 1200
+  discord_chunk_chars: 1900
+  auto_start_on_message: true
+  codex_command: "codex"
+  codex_args: []
+
+projects:
+  - id: example-project
+    name: Example Project
+    # Discord parent text channel ID whose threads should map to this project.
+    channel_id: "123456789012345678"
+    # Absolute path to the local git repo where Codex should run.
+    workdir: "/absolute/path/to/your/project"
+    auto_start_on_message: true
+    codex_command: "codex"
+    codex_args: []

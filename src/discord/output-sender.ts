@@ -11,6 +11,7 @@ export class OutputSender {
   private timer: NodeJS.Timeout | undefined;
   private readonly liveStatusMessages = new Map<string, Message>();
   private readonly liveStatusLastEditedAt = new Map<string, number>();
+  private readonly liveStatusContentKeys = new Map<string, string>();
   private readonly lastPromptKeys = new Map<string, string>();
 
   constructor(
@@ -30,6 +31,7 @@ export class OutputSender {
     if (this.timer) clearInterval(this.timer);
     this.liveStatusMessages.clear();
     this.liveStatusLastEditedAt.clear();
+    this.liveStatusContentKeys.clear();
     this.lastPromptKeys.clear();
   }
 
@@ -82,6 +84,9 @@ export class OutputSender {
     const cleanedPaneText = cleanForDiscord(pane);
     if (!cleanedPaneText.trim()) return;
 
+    const contentKey = cleanedPaneText;
+    if (!shouldUpdateLiveStatusContent({ previousContentKey: this.liveStatusContentKeys.get(record.threadId), nextContentKey: contentKey })) return;
+
     const content = formatLiveStatusMessage({
       cleanedPaneText,
       lineCount: this.config.bridge.liveStatusLines,
@@ -93,14 +98,17 @@ export class OutputSender {
       const edited = await existing.edit(content).catch(() => null);
       if (edited) {
         this.liveStatusLastEditedAt.set(record.threadId, nowMs);
+        this.liveStatusContentKeys.set(record.threadId, contentKey);
         return;
       }
       this.liveStatusMessages.delete(record.threadId);
+      this.liveStatusContentKeys.delete(record.threadId);
     }
 
     const sent = await channel.send(content);
     this.liveStatusMessages.set(record.threadId, sent);
     this.liveStatusLastEditedAt.set(record.threadId, nowMs);
+    this.liveStatusContentKeys.set(record.threadId, contentKey);
   }
 
   private async fetchSendableThread(threadId: string): Promise<({ send: (...args: any[]) => Promise<Message> } & { isTextBased: () => boolean }) | undefined> {
@@ -119,6 +127,15 @@ export interface LiveStatusDecisionInput {
 
 export function shouldEditLiveStatus(input: LiveStatusDecisionInput): boolean {
   return input.lastEditMs === undefined || input.nowMs - input.lastEditMs >= input.updateMs;
+}
+
+export interface LiveStatusContentInput {
+  previousContentKey: string | undefined;
+  nextContentKey: string;
+}
+
+export function shouldUpdateLiveStatusContent(input: LiveStatusContentInput): boolean {
+  return input.previousContentKey === undefined || input.previousContentKey !== input.nextContentKey;
 }
 
 export interface LiveStatusMessageInput {

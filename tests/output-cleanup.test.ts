@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanForDiscord, formatLiveStatusMessage, shouldEditLiveStatus } from "../src/discord/output-sender.js";
+import { cleanForDiscord, formatLiveStatusMessage, shouldEditLiveStatus, shouldUpdateLiveStatusContent } from "../src/discord/output-sender.js";
 
 describe("Codex output cleanup", () => {
   it("removes Codex TUI spinner fragments and prompt echoes while keeping useful output", () => {
@@ -85,5 +85,11 @@ WWo
       "```",
       "Updated 04:32:15"
     ].join("\n"));
+  });
+
+  it("does not refresh live status when the cleaned pane content has not changed", () => {
+    expect(shouldUpdateLiveStatusContent({ previousContentKey: undefined, nextContentKey: "same output" })).toBe(true);
+    expect(shouldUpdateLiveStatusContent({ previousContentKey: "same output", nextContentKey: "same output" })).toBe(false);
+    expect(shouldUpdateLiveStatusContent({ previousContentKey: "old output", nextContentKey: "new output" })).toBe(true);
   });
 });

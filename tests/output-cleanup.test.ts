@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cleanForDiscord, formatLiveStatusMessage, shouldEditLiveStatus, shouldUpdateLiveStatusContent } from "../src/discord/output-sender.js";
+import { cleanForDiscord, formatLiveStatusMessage, isLiveStatusMessage, shouldEditLiveStatus, shouldUpdateLiveStatusContent } from "../src/discord/output-sender.js";
 
 describe("Codex output cleanup", () => {
   it("removes Codex TUI spinner fragments and prompt echoes while keeping useful output", () => {
@@ -91,5 +91,11 @@ WWo
     expect(shouldUpdateLiveStatusContent({ previousContentKey: undefined, nextContentKey: "same output" })).toBe(true);
     expect(shouldUpdateLiveStatusContent({ previousContentKey: "same output", nextContentKey: "same output" })).toBe(false);
     expect(shouldUpdateLiveStatusContent({ previousContentKey: "old output", nextContentKey: "new output" })).toBe(true);
+  });
+
+  it("recognises existing live status messages so restarts can reuse them", () => {
+    expect(isLiveStatusMessage("🧠 Codex is working…\n\n```console\nold output\n```\nUpdated 21:35:01")).toBe(true);
+    expect(isLiveStatusMessage("**Codex wants to run a command**\nAllow this command?")).toBe(false);
+    expect(isLiveStatusMessage("Started Codex session `codex_123`.")).toBe(false);
   });
 });

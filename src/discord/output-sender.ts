@@ -93,8 +93,9 @@ export class OutputSender {
       now: new Date(nowMs)
     });
 
-    const existing = this.liveStatusMessages.get(record.threadId);
+    const existing = this.liveStatusMessages.get(record.threadId) ?? (await this.fetchRecentLiveStatusMessage(channel));
     if (existing) {
+      this.liveStatusMessages.set(record.threadId, existing);
       const edited = await existing.edit(content).catch(() => null);
       if (edited) {
         this.liveStatusLastEditedAt.set(record.threadId, nowMs);
@@ -109,6 +110,21 @@ export class OutputSender {
     this.liveStatusMessages.set(record.threadId, sent);
     this.liveStatusLastEditedAt.set(record.threadId, nowMs);
     this.liveStatusContentKeys.set(record.threadId, contentKey);
+  }
+
+  private async fetchRecentLiveStatusMessage(
+    channel: ({ send: (...args: any[]) => Promise<Message> } & { isTextBased: () => boolean })
+  ): Promise<Message | undefined> {
+    if (!("messages" in channel)) return undefined;
+    const messageManager = (channel as { messages?: { fetch: (options: { limit: number }) => Promise<{ values: () => IterableIterator<Message> }> } }).messages;
+    if (!messageManager || typeof messageManager.fetch !== "function") return undefined;
+
+    const messages = await messageManager.fetch({ limit: 25 }).catch(() => undefined);
+    if (!messages) return undefined;
+    for (const message of messages.values()) {
+      if (message.author?.id === this.client.user?.id && isLiveStatusMessage(message.content)) return message;
+    }
+    return undefined;
   }
 
   private async fetchSendableThread(threadId: string): Promise<({ send: (...args: any[]) => Promise<Message> } & { isTextBased: () => boolean }) | undefined> {
@@ -136,6 +152,10 @@ export interface LiveStatusContentInput {
 
 export function shouldUpdateLiveStatusContent(input: LiveStatusContentInput): boolean {
   return input.previousContentKey === undefined || input.previousContentKey !== input.nextContentKey;
+}
+
+export function isLiveStatusMessage(content: string): boolean {
+  return content.startsWith("🧠 Codex is working…\n");
 }
 
 export interface LiveStatusMessageInput {
